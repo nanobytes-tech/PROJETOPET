@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PetAlerta</title>
+    <link rel="stylesheet" href="dist/tailwind.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <style>
+        html, body { height: 100%; margin: 0; padding: 0; font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        #app-container { display: flex; flex-direction: column; min-height: 100vh; }
+        #main-content { flex-grow: 1; overflow-y: auto; position: relative; }
+        .leaflet-container { height: 100%; width: 100%; }
+        .tab { transition: all 0.2s ease-in-out; }
+        .tab-active { color: #f97316; border-bottom-color: #f97316; }
+        .loader { border-top-color: #f97316; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .map-filter-btn.active-filter { background-color: #f97316; color: white; }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐾</text></svg>">
+</head>
+<body class="bg-gray-100">
+
+    <div id="app-container" class="w-full bg-white">
+        <!-- Ecrã de Loading -->
+        <div id="loading-screen" class="p-8 flex flex-col justify-center items-center h-full">
+            <div class="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-24 w-24 mb-4"></div>
+            <p class="text-lg text-gray-600">A iniciar PetAlerta...</p>
+        </div>
+
+        <!-- Ecrãs de Autenticação -->
+        <div id="login-screen" class="hidden p-8 flex flex-col justify-center h-full">
+            <h1 class="text-3xl font-bold text-center mb-8">PetAlerta</h1>
+            <input id="login-email" type="email" placeholder="Email" class="w-full p-3 mb-4 border rounded-lg">
+            <input id="login-password" type="password" placeholder="Palavra-passe" class="w-full p-3 mb-4 border rounded-lg">
+            <button id="login-btn" class="w-full bg-orange-500 text-white font-bold py-3 rounded-lg hover:bg-orange-600 transition h-14 flex items-center justify-center"></button>
+            <button id="goto-register-btn" class="mt-4 text-orange-500">Não tem conta? Registe-se</button>
+        </div>
+        <div id="register-screen" class="hidden p-8 flex flex-col justify-center h-full">
+            <h1 class="text-3xl font-bold text-center mb-8">Criar Conta</h1>
+            <input id="register-email" type="email" placeholder="Email" class="w-full p-3 mb-4 border rounded-lg">
+            <input id="register-password" type="password" placeholder="Palavra-passe" class="w-full p-3 mb-4 border rounded-lg">
+            <button id="register-btn" class="w-full bg-orange-500 text-white font-bold py-3 rounded-lg hover:bg-orange-600 transition h-14 flex items-center justify-center"></button>
+            <button id="goto-login-btn" class="mt-4 text-orange-500">Já tem conta? Entre</button>
+        </div>
+
+        <!-- Conteúdo Principal da App -->
+        <div id="main-app" class="hidden flex flex-col h-full">
+            <header class="p-4 bg-orange-500 text-white flex justify-between items-center shadow-md">
+                <h1 id="header-title" class="text-xl font-bold">PetAlerta</h1>
+                <button id="logout-btn" class="font-semibold">Sair</button>
+            </header>
+            <main id="main-content" class="flex-grow bg-gray-50"></main>
+            <nav class="grid grid-cols-4 border-t bg-white">
+                <button data-tab="map" class="tab tab-active p-4 text-center border-b-2">Mapa</button>
+                <button data-tab="alerts" class="tab p-4 text-center border-b-2 border-transparent">Alertas</button>
+                <button data-tab="report" class="tab p-4 text-center border-b-2 border-transparent">Reportar</button>
+                <button data-tab="profile" class="tab p-4 text-center border-b-2 border-transparent">Perfil</button>
+            </nav>
+        </div>
+
+        <!-- MODAL DE DETALHES -->
+        <div id="details-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+            <div id="details-modal-content" class="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[90vh] flex flex-col"></div>
+        </div>
+    </div>
+
+    <!-- Templates de Conteúdo das Abas -->
+    <template id="map-template">
+        <div class="relative h-full w-full">
+            <div id="map-filters" class="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] bg-white/80 backdrop-blur-sm p-2 rounded-full shadow-lg flex space-x-2">
+                <button data-filter="Todos" class="map-filter-btn active-filter px-4 py-1 rounded-full text-sm font-semibold">Todos</button>
+                <button data-filter="Cachorro" class="map-filter-btn px-4 py-1 rounded-full text-sm font-semibold">Cães</button>
+                <button data-filter="Gato" class="map-filter-btn px-4 py-1 rounded-full text-sm font-semibold">Gatos</button>
+            </div>
+            <div id="map-container" class="h-full w-full"></div>
+        </div>
+    </template>
+    <template id="alerts-template">
+        <div class="p-4 md:p-6">
+            <input id="search-bar" type="text" placeholder="Pesquisar por nome..." class="w-full p-3 mb-4 border rounded-lg">
+            <div id="alerts-list" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"></div>
+        </div>
+    </template>
+    <template id="report-template">
+        <div class="p-4 md:p-6">
+            <h2 id="report-title" class="text-xl font-semibold mb-4">Reportar Animal Perdido</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 md:gap-8">
+                <div class="space-y-4">
+                    <div><label class="block text-sm font-medium text-gray-700">Nome do Pet</label><input id="report-name" type="text" class="w-full p-2 border rounded-md"></div>
+                    <div><label class="block text-sm font-medium text-gray-700">Tipo</label><select id="report-type" class="w-full p-2 border rounded-md"><option>Cachorro</option><option>Gato</option><option>Outro</option></select></div>
+                    <div><label class="block text-sm font-medium text-gray-700">Seu Nome</label><input id="report-contact-name" type="text" class="w-full p-2 border rounded-md"></div>
+                    <div><label class="block text-sm font-medium text-gray-700">Seu Telefone</label><input id="report-contact-phone" type="tel" class="w-full p-2 border rounded-md"></div>
+                    <div><label class="block text-sm font-medium text-gray-700">Foto (<span id="photo-label-text"></span>)</label><input id="report-photo" type="file" accept="image/*" class="w-full"></div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Última Localização</label>
+                    <div id="report-map" class="h-64 md:h-full w-full border rounded-md bg-gray-200 flex items-center justify-center"><p class="text-gray-500">A carregar mapa...</p></div>
+                </div>
+            </div>
+            <button id="report-submit-btn" class="mt-6 w-full bg-orange-500 text-white font-bold py-3 rounded-lg hover:bg-orange-600 transition h-14 flex items-center justify-center">Enviar Alerta</button>
+        </div>
+    </template>
+    <template id="profile-template">
+        <div class="p-4 md:p-6">
+            <div class="text-center mb-6">
+                <h2 class="text-2xl font-bold">Meu Perfil</h2>
+                <p id="profile-email" class="text-gray-600"></p>
+            </div>
+            <h3 class="text-lg font-semibold mb-4">Meus Alertas Reportados</h3>
+            <div id="my-alerts-list" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"></div>
+        </div>
+    </template>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+        import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, doc, updateDoc, serverTimestamp, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
+
+        document.addEventListener('DOMContentLoaded', () => {
+            let searchTerm = '', typeFilter = 'Todos';
+            const screens = { loading: document.getElementById('loading-screen'), login: document.getElementById('login-screen'), register: document.getElementById('register-screen'), main: document.getElementById('main-app'), };
+            let app, auth, db, storage, map, petsCache = [], unsubscribePets, currentUser, unsubscribeComments = null;
+
+            const firebaseConfig = {
+                apiKey: "AIzaSyAaedVRibTzBXEzJZgeroR9LNgNs_H6e4k",
+                authDomain: "petalerta-f62d6.firebaseapp.com",
+                projectId: "petalerta-f62d6",
+                storageBucket: "petalerta-f62d6.appspot.com",
+                messagingSenderId: "388011468744",
+                appId: "1:388011468744:web:f8867023355648132e02fd"
+            };
+
+            function showScreen(screenName) { Object.values(screens).forEach(s => s.classList.add('hidden')); if (screens[screenName]) screens[screenName].classList.remove('hidden'); }
+            function setButtonLoading(button, isLoading, text = '') { if (isLoading) { button.disabled = true; button.innerHTML = '<div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-6 w-6 mx-auto"></div>'; } else { button.disabled = false; button.innerHTML = text || button.dataset.originalText; } }
+
+            function setupApp(user) {
+                const mainContent = document.getElementById('main-content');
+                const tabs = document.querySelectorAll('.tab');
+                const headerTitle = document.getElementById('header-title');
+                
+                function updateActiveView() {
+                    const activeTab = document.querySelector('.tab-active')?.dataset.tab;
+                    if (!activeTab) return;
+                    if (activeTab === 'map') renderMap();
+                    if (activeTab === 'alerts') renderAlerts();
+                    if (activeTab === 'profile') renderProfile(user);
+                }
+
+                function switchTab(tabName, petToEdit = null) {
+                    tabs.forEach(t => t.classList.remove('tab-active'));
+                    const activeTabEl = document.querySelector(`[data-tab="${tabName}"]`);
+                    if (activeTabEl) activeTabEl.classList.add('tab-active');
+                    mainContent.innerHTML = '';
+                    const template = document.getElementById(`${tabName}-template`);
+                    if (template) mainContent.appendChild(template.content.cloneNode(true));
+                    headerTitle.textContent = tabName.charAt(0).toUpperCase() + tabName.slice(1);
+                    if (tabName === 'report') {
+                        setupReportForm(user, petToEdit);
+                    } else {
+                        updateActiveView();
+                    }
+                }
+                window.switchTab = switchTab;
+                tabs.forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.tab)));
+                if (unsubscribePets) unsubscribePets();
+                const q = query(collection(db, "pets"), orderBy("createdAt", "desc"));
+                unsubscribePets = onSnapshot(q, (querySnapshot) => {
+                    petsCache = [];
+                    querySnapshot.forEach((doc) => petsCache.push({ id: doc.id, ...doc.data() }));
+                    updateActiveView();
+                });
+                switchTab('map');
+            }
+
+            async function deletePet(pet) {
+                if (!confirm(`Tem a certeza que quer apagar o alerta para "${pet.name}"? Esta ação é irreversível.`)) return;
+                const modal = document.getElementById('details-modal');
+                modal.innerHTML = '<div class="p-8"><div class="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-24 w-24 mx-auto"></div><p class="text-center mt-4">A apagar...</p></div>';
+                try {
+                    await deleteDoc(doc(db, "pets", pet.id));
+                    const imageRef = ref(storage, pet.photoUri);
+                    await deleteObject(imageRef);
+                    alert('Alerta apagado com sucesso!');
+                } catch (error) { console.error("Erro ao apagar o pet:", error); alert('Ocorreu um erro ao apagar o alerta.');
+                } finally { modal.classList.add('hidden'); }
+            }
+
+            function showDetailsModal(pet) {
+                const modal = document.getElementById('details-modal');
+                const content = document.getElementById('details-modal-content');
+                const isOwner = currentUser && currentUser.uid === pet.authorId;
+                const timeSince = (date) => {
+                    if (!date?.toDate) return '';
+                    const seconds = Math.floor((new Date().getTime() - date.toDate().getTime()) / 1000);
+                    let interval = seconds / 86400; if (interval > 1) return `há ${Math.floor(interval)} dias`;
+                    interval = seconds / 3600; if (interval > 1) return `há ${Math.floor(interval)} horas`;
+                    interval = seconds / 60; if (interval > 1) return `há ${Math.floor(interval)} minutos`;
+                    return 'agora mesmo';
+                };
+                content.innerHTML = `
+                    <header class="p-4 border-b flex justify-between items-center"><h2 class="text-xl font-bold">${pet.name}</h2><button id="close-modal-btn" class="text-2xl font-bold">&times;</button></header>
+                    <div class="p-4 overflow-y-auto">
+                        <img src="${pet.photoUri}" class="w-full h-64 object-cover rounded-lg mb-4">
+                        <div class="flex items-center justify-between mb-4"><span class="bg-orange-100 text-orange-800 text-sm font-medium mr-2 px-2.5 py-0.5 rounded">${pet.type}</span><span class="text-sm text-gray-500">${timeSince(pet.createdAt)}</span></div>
+                        ${pet.isFound ? '<div class="mb-4 p-3 bg-green-100 text-green-800 rounded-lg text-center font-semibold">Este pet já foi encontrado!</div>' : ''}
+                        <h3 class="text-lg font-semibold mt-4 mb-2">Informações de Contacto</h3>
+                        <p><strong class="font-semibold">Nome:</strong> ${pet.contactName}</p><p><strong class="font-semibold">Telefone:</strong> ${pet.contactPhone}</p>
+                        <a href="tel:${pet.contactPhone}" class="mt-4 w-full block text-center bg-green-500 text-white font-bold py-3 rounded-lg hover:bg-green-600 transition">Ligar</a>
+                        <div class="my-4 border-t"></div>
+                        <h3 class="text-lg font-semibold mb-2">Comentários e Pistas</h3>
+                        <div id="comments-list" class="space-y-2 mb-4 max-h-48 overflow-y-auto"></div>
+                        <div class="flex space-x-2"><input id="new-comment-input" class="flex-grow p-2 border rounded-md" placeholder="Deixe uma pista..."><button id="send-comment-btn" class="bg-orange-500 text-white px-4 py-2 rounded-md">Enviar</button></div>
+                        ${isOwner ? `<h3 class="text-lg font-semibold mt-6 mb-2">Ações do Dono</h3><div class="space-y-2"><button id="edit-btn" class="w-full bg-gray-500 text-white font-bold py-3 rounded-lg hover:bg-gray-600 transition">Editar Alerta</button><button id="toggle-found-btn" class="w-full bg-blue-500 text-white font-bold py-3 rounded-lg hover:bg-blue-600 transition">${pet.isFound ? 'Marcar como Perdido' : 'Marcar como Encontrado'}</button><button id="delete-btn" class="w-full bg-red-600 text-white font-bold py-3 rounded-lg hover:bg-red-700 transition">Apagar Alerta</button></div>` : ''}
+                    </div>`;
+                modal.classList.remove('hidden');
+                
+                const closeModal = () => { if (unsubscribeComments) unsubscribeComments(); modal.classList.add('hidden'); };
+                document.getElementById('close-modal-btn').onclick = closeModal;
+                
+                const commentsList = document.getElementById('comments-list');
+                const commentsRef = collection(db, 'pets', pet.id, 'comments');
+                const qComments = query(commentsRef, orderBy('createdAt', 'asc'));
+                unsubscribeComments = onSnapshot(qComments, (snapshot) => {
+                    commentsList.innerHTML = '';
+                    if (snapshot.empty) { commentsList.innerHTML = '<p class="text-sm text-gray-500">Nenhum comentário ainda.</p>'; }
+                    snapshot.forEach(doc => {
+                        const comment = doc.data();
+                        const commentEl = document.createElement('div');
+                        commentEl.className = 'bg-gray-100 p-3 rounded-lg';
+                        commentEl.innerHTML = `<p class="font-semibold text-sm">${comment.authorName}</p><p>${comment.text}</p><p class="text-xs text-gray-400 text-right">${timeSince(comment.createdAt)}</p>`;
+                        commentsList.appendChild(commentEl);
+                    });
+                });
+
+                document.getElementById('send-comment-btn').onclick = async () => {
+                    const input = document.getElementById('new-comment-input');
+                    if (!input.value.trim()) return;
+                    await addDoc(commentsRef, {
+                        text: input.value, authorId: currentUser.uid,
+                        authorName: currentUser.email.split('@')[0], createdAt: serverTimestamp()
+                    });
+                    input.value = '';
+                };
+
+                if(isOwner) {
+                    document.getElementById('toggle-found-btn').onclick = async () => { await updateDoc(doc(db, 'pets', pet.id), { isFound: !pet.isFound }); closeModal(); };
+                    document.getElementById('delete-btn').onclick = () => deletePet(pet);
+                    document.getElementById('edit-btn').onclick = () => { closeModal(); window.switchTab('report', pet); };
+                }
+            }
+
+            function renderMap() {
+                if (map) { map.remove(); map = null; }
+                const mapContainer = document.getElementById('map-container');
+                if (!mapContainer) return;
+                
+                const renderMarkers = (currentMap) => {
+                    const filteredPets = petsCache.filter(pet => typeFilter === 'Todos' || pet.type === typeFilter);
+                    filteredPets.forEach(pet => {
+                        const icon = L.divIcon({ html: `<img src="${pet.photoUri}" style="width: 40px; height: 40px; border-radius: 50%; border: 3px solid ${pet.isFound ? '#28a745' : '#f4511e'}; box-shadow: 0 0 5px rgba(0,0,0,0.5);">`, className: '', iconSize: [40, 40] });
+                        const marker = L.marker([pet.location.latitude, pet.location.longitude], { icon }).addTo(currentMap);
+                        marker.on('click', () => showDetailsModal(pet));
+                    });
+                };
+                
+                const fallbackMap = () => {
+                    map = L.map(mapContainer).setView([-16.72, -43.86], 13);
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+                    renderMarkers(map);
+                };
+
+                navigator.geolocation.getCurrentPosition(position => {
+                    const { latitude, longitude } = position.coords;
+                    map = L.map(mapContainer).setView([latitude, longitude], 13);
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+                    renderMarkers(map);
+                }, fallbackMap);
+
+                document.querySelectorAll('.map-filter-btn').forEach(btn => {
+                    if (btn.dataset.filter === typeFilter) btn.classList.add('active-filter');
+                    btn.onclick = () => { typeFilter = btn.dataset.filter; renderMap(); };
+                });
+            }
+
+            function renderAlerts() {
+                const list = document.getElementById('alerts-list');
+                const searchBar = document.getElementById('search-bar');
+                searchBar.value = searchTerm;
+                const filteredPets = petsCache.filter(pet => pet.name.toLowerCase().includes(searchTerm.toLowerCase()));
+                list.innerHTML = '';
+                if (filteredPets.length === 0) { list.innerHTML = '<p class="text-center text-gray-500 mt-8 col-span-full">Nenhum alerta encontrado.</p>'; return; }
+                filteredPets.forEach(pet => {
+                    const card = document.createElement('div');
+                    card.className = `bg-white rounded-lg shadow overflow-hidden cursor-pointer ${pet.isFound ? 'opacity-60' : ''}`;
+                    card.innerHTML = `<img src="${pet.photoUri}" class="w-full h-40 object-cover"><div class="p-4"><div class="flex justify-between items-start"><div><h3 class="font-bold text-lg">${pet.name}</h3><p class="text-gray-600 text-sm">${pet.type}</p></div>${pet.isFound ? '<span class="text-xs bg-green-100 text-green-800 p-1 rounded-md font-semibold">Encontrado</span>' : ''}</div></div>`;
+                    card.onclick = () => showDetailsModal(pet);
+                    list.appendChild(card);
+                });
+                searchBar.oninput = (e) => { searchTerm = e.target.value; renderAlerts(); };
+            }
+            
+            function setupReportForm(user, petToEdit = null) {
+                const reportMapContainer = document.getElementById('report-map');
+                let reportMap, marker, currentCoords;
+                const title = document.getElementById('report-title'),
+                    nameInput = document.getElementById('report-name'),
+                    typeInput = document.getElementById('report-type'),
+                    contactNameInput = document.getElementById('report-contact-name'),
+                    contactPhoneInput = document.getElementById('report-contact-phone'),
+                    photoInput = document.getElementById('report-photo'),
+                    photoLabel = document.getElementById('photo-label-text'),
+                    submitBtn = document.getElementById('report-submit-btn');
+
+                const initializeMap = (lat, lng) => {
+                    if (!reportMapContainer) return;
+                    if (reportMap) reportMap.remove();
+                    // Garante altura do container
+                    reportMapContainer.style.height = '300px';
+                    reportMapContainer.innerHTML = '';
+                    reportMap = L.map(reportMapContainer).setView([lat, lng], 13);
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(reportMap);
+                    marker = L.marker([lat, lng], { draggable: true }).addTo(reportMap);
+                    currentCoords = marker.getLatLng();
+                    marker.on('dragend', (e) => { currentCoords = e.target.getLatLng(); });
+                };
+
+                if (petToEdit) {
+                    title.textContent = 'Editar Alerta';
+                    nameInput.value = petToEdit.name;
+                    typeInput.value = petToEdit.type;
+                    contactNameInput.value = petToEdit.contactName;
+                    contactPhoneInput.value = petToEdit.contactPhone;
+                    photoLabel.textContent = 'deixe em branco para não alterar';
+                    submitBtn.innerHTML = 'Guardar Alterações';
+                    initializeMap(petToEdit.location.latitude, petToEdit.location.longitude);
+                } else {
+                    title.textContent = 'Reportar Animal Perdido';
+                    nameInput.value = '';
+                    typeInput.value = 'Cachorro';
+                    contactNameInput.value = user?.displayName || user?.email?.split('@')[0] || '';
+                    contactPhoneInput.value = '';
+                    photoLabel.textContent = 'obrigatória';
+                    submitBtn.innerHTML = 'Enviar Alerta';
+                    navigator.geolocation.getCurrentPosition(
+                        pos => initializeMap(pos.coords.latitude, pos.coords.longitude),
+                        () => initializeMap(-16.722, -43.869)
+                    );
+                }
+                submitBtn.dataset.originalText = submitBtn.innerHTML;
+                if (!submitBtn.hasAttribute('data-listener-added')) {
+                    submitBtn.addEventListener('click', async () => {
+                        if (!marker) { alert("Mapa não foi inicializado. Por favor, aguarde."); return; }
+                        const name = nameInput.value,
+                            type = typeInput.value,
+                            contactName = contactNameInput.value,
+                            contactPhone = contactPhoneInput.value,
+                            photoFile = photoInput.files[0];
+                        if (!name || !contactName || !contactPhone || (!photoFile && !petToEdit)) {
+                            alert('Por favor, preencha todos os campos obrigatórios.');
+                            return;
+                        }
+                        setButtonLoading(submitBtn, true);
+                        try {
+                            const location = marker.getLatLng();
+                            const dataToSave = {
+                                name,
+                                type,
+                                contactName,
+                                contactPhone,
+                                location: { latitude: location.lat, longitude: location.lng }
+                            };
+                            if (petToEdit) {
+                                let photoUrl = petToEdit.photoUri;
+                                if (photoFile) {
+                                    const oldImageRef = ref(storage, petToEdit.photoUri);
+                                    try { await deleteObject(oldImageRef); } catch (e) { console.warn("Foto antiga não encontrada para apagar, continuando."); }
+                                    const newImageRef = ref(storage, `pets/${Date.now()}_${photoFile.name}`);
+                                    await uploadBytes(newImageRef, photoFile);
+                                    photoUrl = await getDownloadURL(newImageRef);
+                                }
+                                const petDocRef = doc(db, "pets", petToEdit.id);
+                                await updateDoc(petDocRef, { ...dataToSave, photoUri: photoUrl });
+                                alert('Alerta atualizado com sucesso!');
+                            } else {
+                                const storageRef = ref(storage, `pets/${Date.now()}_${photoFile.name}`);
+                                await uploadBytes(storageRef, photoFile);
+                                const photoUri = await getDownloadURL(storageRef);
+                                await addDoc(collection(db, "pets"), {
+                                    ...dataToSave,
+                                    photoUri,
+                                    isFound: false,
+                                    authorId: user.uid,
+                                    createdAt: serverTimestamp()
+                                });
+                                alert('Alerta enviado com sucesso!');
+                            }
+                            document.querySelector('[data-tab="alerts"]').click();
+                        } catch (e) {
+                            alert('Erro ao guardar o alerta. Tente novamente.');
+                            console.error("Erro completo:", e);
+                        } finally {
+                            setButtonLoading(submitBtn, false);
+                        }
+                    });
+                    submitBtn.setAttribute('data-listener-added', 'true');
+                }
+            }
+
+            function renderProfile(user) {
+                document.getElementById('profile-email').textContent = user.email;
+                const myList = document.getElementById('my-alerts-list');
+                myList.innerHTML = '';
+                const myPets = petsCache.filter(pet => pet.authorId === user.uid);
+                if (myPets.length === 0) { myList.innerHTML = '<p class="text-center text-gray-500 mt-8 col-span-full">Você ainda não reportou nenhum alerta.</p>'; return; }
+                myPets.forEach(pet => {
+                    const card = document.createElement('div');
+                    card.className = `bg-white rounded-lg shadow overflow-hidden cursor-pointer ${pet.isFound ? 'opacity-60' : ''}`;
+                    card.innerHTML = `<img src="${pet.photoUri}" class="w-full h-40 object-cover"><div class="p-4"><div class="flex justify-between items-start"><div><h3 class="font-bold text-lg">${pet.name}</h3><p class="text-gray-600 text-sm">${pet.type}</p></div>${pet.isFound ? '<span class="text-xs bg-green-100 text-green-800 p-1 rounded-md font-semibold">Encontrado</span>' : ''}</div></div>`;
+                    card.onclick = () => showDetailsModal(pet);
+                    myList.appendChild(card);
+                });
+            }
+
+            try {
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+                storage = getStorage(app);
+
+                const loginBtn = document.getElementById('login-btn'), registerBtn = document.getElementById('register-btn');
+                loginBtn.dataset.originalText = 'Entrar'; registerBtn.dataset.originalText = 'Registar';
+                loginBtn.innerHTML = 'Entrar'; registerBtn.innerHTML = 'Registar';
+                
+                loginBtn.addEventListener('click', async () => {
+                    const email = document.getElementById('login-email').value, password = document.getElementById('login-password').value;
+                    setButtonLoading(loginBtn, true);
+                    try { await signInWithEmailAndPassword(auth, email, password); } catch (error) { alert(error.message);
+                    } finally { setButtonLoading(loginBtn, false); }
+                });
+                registerBtn.addEventListener('click', async () => {
+                    const email = document.getElementById('register-email').value, password = document.getElementById('register-password').value;
+                    setButtonLoading(registerBtn, true);
+                    try { await createUserWithEmailAndPassword(auth, email, password); alert('Conta criada! Por favor, faça login.'); showScreen('login');
+                    } catch (error) { alert(error.message);
+                    } finally { setButtonLoading(registerBtn, false); }
+                });
+                
+                onAuthStateChanged(auth, user => {
+                    currentUser = user;
+                    if (user) { showScreen('main'); setupApp(user); } else { showScreen('login'); }
+                });
+
+                document.getElementById('goto-register-btn').addEventListener('click', () => showScreen('register'));
+                document.getElementById('goto-login-btn').addEventListener('click', () => showScreen('login'));
+                document.getElementById('logout-btn').addEventListener('click', () => signOut(auth));
+
+            } catch (error) {
+                alert('Ocorreu um erro crítico na inicialização. A aplicação não pode continuar.');
+                console.error("Erro fatal:", error);
+            }
+        });
+    </script>
+</body>
+</html>
