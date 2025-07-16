@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PetAlerta</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+
+    #app-container {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #map-container {
+      flex: 1;
+      height: 100%;
+      width: 100%;
+    }
+
+    .leaflet-container {
+      height: 100%;
+      width: 100%;
+    }
+
+    .map-filter-btn.active-filter {
+      background-color: #f97316;
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <div id="app-container" class="h-screen w-screen flex flex-col"></div>
+
+  <!-- Template do mapa + botões + modal -->
+  <template id="map-template">
+    <div class="relative h-full w-full">
+      <!-- Filtros -->
+      <div class="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] bg-white/90 p-2 rounded-full shadow flex gap-2">
+        <button data-filter="Todos" class="map-filter-btn active-filter px-3 py-1 rounded-full text-sm">Todos</button>
+        <button data-filter="Cachorro" class="map-filter-btn px-3 py-1 rounded-full text-sm">Cães</button>
+        <button data-filter="Gato" class="map-filter-btn px-3 py-1 rounded-full text-sm">Gatos</button>
+      </div>
+
+      <!-- Mapa -->
+      <div id="map-container"></div>
+
+      <!-- Botão Registrar -->
+      <button id="btn-registrar" class="absolute bottom-4 right-4 z-[1000] bg-orange-500 hover:bg-orange-600 text-white px-5 py-3 rounded-full shadow-lg font-semibold">
+        Registrar alerta
+      </button>
+
+      <!-- Modal -->
+      <div id="modal" class="fixed inset-0 bg-black/50 flex items-center justify-center hidden z-[2000]">
+        <div class="bg-white p-6 rounded-lg shadow-lg w-[90%] max-w-md">
+          <h2 class="text-xl font-semibold mb-4">Registrar Alerta</h2>
+          <form id="form-alerta" class="space-y-3">
+            <input type="text" id="nome" class="w-full border border-gray-300 p-2 rounded" placeholder="Nome do animal" required />
+            <select id="tipo" class="w-full border border-gray-300 p-2 rounded" required>
+              <option value="">Tipo do animal</option>
+              <option value="Cachorro">Cachorro</option>
+              <option value="Gato">Gato</option>
+            </select>
+            <textarea id="descricao" class="w-full border border-gray-300 p-2 rounded" placeholder="Descrição" rows="3" required></textarea>
+            <div class="flex justify-end gap-2 pt-2">
+              <button type="button" id="cancelar" class="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400">Cancelar</button>
+              <button type="submit" class="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600">Salvar</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- Script principal -->
+  <script type="module">
+    document.addEventListener('DOMContentLoaded', () => {
+      const container = document.getElementById('app-container');
+      const template = document.getElementById('map-template');
+      const clone = template.content.cloneNode(true);
+      container.appendChild(clone);
+
+      const map = L.map('map-container').setView([-23.55052, -46.633308], 13);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+      }).addTo(map);
+
+      const marcadores = [
+        { tipo: 'Cachorro', coords: [-23.55052, -46.633308], mensagem: 'Cachorro perdido aqui!' },
+        { tipo: 'Gato', coords: [-23.554, -46.638], mensagem: 'Gato visto nesta área.' }
+      ];
+
+      const markerLayer = L.layerGroup().addTo(map);
+
+      function renderizarMarcadores(tipo) {
+        markerLayer.clearLayers();
+        const filtrados = tipo === 'Todos' ? marcadores : marcadores.filter(m => m.tipo === tipo);
+        filtrados.forEach(m => {
+          L.marker(m.coords).bindPopup(m.mensagem).addTo(markerLayer);
+        });
+      }
+
+      renderizarMarcadores('Todos');
+
+      document.querySelectorAll('.map-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.map-filter-btn').forEach(b => {
+            b.classList.remove('active-filter');
+            b.setAttribute('aria-pressed', 'false');
+          });
+          btn.classList.add('active-filter');
+          btn.setAttribute('aria-pressed', 'true');
+          renderizarMarcadores(btn.dataset.filter);
+        });
+      });
+
+      // Modal
+      const btnRegistrar = document.getElementById('btn-registrar');
+      const modal = document.getElementById('modal');
+      const form = document.getElementById('form-alerta');
+      const btnCancelar = document.getElementById('cancelar');
+
+      btnRegistrar.addEventListener('click', () => {
+        modal.classList.remove('hidden');
+      });
+
+      btnCancelar.addEventListener('click', () => {
+        modal.classList.add('hidden');
+        form.reset();
+      });
+
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+
+        const nome = document.getElementById('nome').value.trim();
+        const tipo = document.getElementById('tipo').value;
+        const descricao = document.getElementById('descricao').value.trim();
+
+        const mensagem = `${nome}: ${descricao}`;
+
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              adicionarAlerta(pos.coords.latitude, pos.coords.longitude, tipo, mensagem);
+            },
+            () => {
+              const center = map.getCenter();
+              adicionarAlerta(center.lat, center.lng, tipo, mensagem);
+            }
+          );
+        } else {
+          const center = map.getCenter();
+          adicionarAlerta(center.lat, center.lng, tipo, mensagem);
+        }
+
+        modal.classList.add('hidden');
+        form.reset();
+      });
+
+      function adicionarAlerta(lat, lng, tipo, mensagem) {
+        marcadores.push({ tipo, coords: [lat, lng], mensagem });
+        const filtroAtual = document.querySelector('.map-filter-btn.active-filter').dataset.filter;
+        renderizarMarcadores(filtroAtual);
+      }
+    });
+  </script>
+</body>
+</html>
